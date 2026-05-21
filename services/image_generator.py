@@ -15,7 +15,7 @@ async def generate_image(prompt: str) -> str:
         prompt=prompt,
         n=1,
         size="1024x1024",
-        quality="low",
+        quality="medium",
     )
 
     return response.data[0].b64_json
