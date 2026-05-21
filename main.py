@@ -1,8 +1,9 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import uuid
 from typing import Any
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -19,6 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+previews: dict[str, dict] = {}
+
 
 class ImageRequest(BaseModel):
     context: dict[str, Any]
@@ -27,7 +30,7 @@ class ImageRequest(BaseModel):
 class ImageResponse(BaseModel):
     image_base64: str
     prompt_used: str
-    preview_html: str
+    preview_url: str
     format: str = "png"
 
 
@@ -37,21 +40,32 @@ def health():
 
 
 @app.post("/generate-image", response_model=ImageResponse)
-async def generate_image_endpoint(request: ImageRequest):
+async def generate_image_endpoint(request: ImageRequest, req: Request):
     prompt = await build_image_prompt(request.context)
     image_b64 = await generate_image(prompt)
-    preview = _build_preview_html(image_b64, prompt)
-    return ImageResponse(image_base64=image_b64, prompt_used=prompt, preview_html=preview)
+
+    preview_id = str(uuid.uuid4())
+    previews[preview_id] = {"image_b64": image_b64, "prompt": prompt}
+
+    base_url = str(req.base_url).rstrip("/")
+    preview_url = f"{base_url}/preview/{preview_id}"
+
+    return ImageResponse(
+        image_base64=image_b64,
+        prompt_used=prompt,
+        preview_url=preview_url,
+    )
 
 
-@app.post("/generate-image/preview", response_class=HTMLResponse)
-async def generate_image_preview(request: ImageRequest):
-    prompt = await build_image_prompt(request.context)
-    image_b64 = await generate_image(prompt)
-    return HTMLResponse(_build_preview_html(image_b64, prompt))
+@app.get("/preview/{preview_id}", response_class=HTMLResponse)
+def get_preview(preview_id: str):
+    data = previews.get(preview_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Preview not found or expired")
+    return HTMLResponse(_build_html(data["image_b64"], data["prompt"]))
 
 
-def _build_preview_html(image_b64: str, prompt: str) -> str:
+def _build_html(image_b64: str, prompt: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
